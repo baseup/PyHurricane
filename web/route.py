@@ -75,7 +75,8 @@ class Route:
                 if not filters or 'before' not in filters:
                     return
                 for before_fn_val in filters['before']:
-                    if (yield before_fn_val(request_handler)):
+                    before_return = yield before_fn_val(request_handler)
+                    if before_return or before_return is None:
                         if request_handler.is_finished():
                             return False
                         continue
@@ -86,11 +87,13 @@ class Route:
                 if not filters or 'after' not in filters:
                     return
                 for after_fn_val in filters['after']:
-                    if (yield after_fn_val(request_handler)):
+                    after_return = yield after_fn_val(request_handler)
+                    if after_return or after_return is None:
                         if request_handler.is_finished():
-                            return
+                            return False
                         continue
-                    return
+                    return False
+                return True
 
             before_func = make_non_blocking(before_func)
             action = make_non_blocking(action)
