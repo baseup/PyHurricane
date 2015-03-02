@@ -8,4 +8,4 @@ class AsyncTaskPool:
 
     @gen.coroutine
     def async_task(self, blocking_func, args=None):
-        return yield self._pool.submit(blocking_func, args)
+        return (yield self._pool.submit(blocking_func, args))
