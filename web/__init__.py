@@ -1,6 +1,7 @@
 from hurricane.template import Loader, append_template_suffix
 from motorengine.connection import connect
 from hurricane.io import AsyncTaskPool
+from hurricane.helpers import to_json
 from motorengine import Document
 from hurricane.db import Model
 from types import ModuleType
@@ -384,12 +385,8 @@ class RequestHandler(tornado.web.RequestHandler):
         self.set_header('Expires', '0')
 
     def render_json(self, data):
-        if isinstance(data, list):
-            for k, v in enumerate(data):
-                if isinstance(v, Document):
-                    data[k] = v.to_son()
         self.set_header('Content-Type', 'application/json')
-        self.write(tornado.escape.json_encode(data))
+        self.write(to_json(data))
         self.finish()
 
     def write_error(self, status_code, **kwargs):
