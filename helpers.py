@@ -3,9 +3,10 @@ from hurricane.db import Model
 
 def to_json_serializable(data):
     if isinstance(data, list):
-        for k, v in enumerate(data):
-            data[k] = to_json_serializable(v)
-        return data
+        new_list = []
+        for v in data:
+            new_list.append(to_json_serializable(v))
+        return new_list
     if isinstance(data, Model):
         data = data.serialize()
     if isinstance(data, dict):

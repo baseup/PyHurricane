@@ -1,4 +1,5 @@
 from concurrent.futures import ThreadPoolExecutor
+from tornado.process import cpu_count
 from tornado import gen, web
 
 def make_async(action):
@@ -15,8 +16,8 @@ def make_non_blocking(action):
 class AsyncTaskPool:
 
     def __init__(self):
-        self._pool = ThreadPoolExecutor(max_workers=12)
+        self._pool = ThreadPoolExecutor(cpu_count() * 5)
 
-    @gen.coroutine
+    @make_coroutine
     def async_task(self, blocking_func, *args, **kwargs):
         return (yield self._pool.submit(blocking_func, *args, **kwargs))
