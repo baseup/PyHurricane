@@ -1,9 +1,13 @@
 from hurricane.template import Loader, append_template_suffix
 from motorengine.connection import connect
 from hurricane.io import AsyncTaskPool
+from hurricane.helpers import to_json
+from motorengine import Document
+from hurricane.db import Model
 from types import ModuleType
 from . import route
 
+import tornado.options
 import tornado.escape
 import tornado.ioloop
 import tornado.web
@@ -201,7 +205,9 @@ class Config:
         'global_xss_filter',
         'template_suffix',
         'thread_max_workers',
-        'database'
+        'database',
+        'enable_logs',
+        'log_path'
     ]
 
     _default_values = {
@@ -211,7 +217,9 @@ class Config:
         'autoescape': 'xhtml_escape',
         'static_path': 'assets',
         'static_url_prefix': 'assets/',
-        'global_xss_filter': False
+        'global_xss_filter': False,
+        'log_path': 'logs/',
+        'enable_logs': False
     }
 
     @staticmethod
@@ -302,6 +310,16 @@ class Application(tornado.web.Application):
         template_loader.set_template_suffix(settings['template_suffix'])
         settings['template_loader'] = template_loader
 
+        cli_args = [sys.argv[0]]
+        if 'enable_logs' in settings and settings['enable_logs'] and 'log_path' in settings and settings['log_path']:
+            settings['log_path'] = self.root_dir + '/' + settings['log_path'].strip('/') + '/'
+            if not os.path.exists(settings['log_path']):
+                os.mkdir(settings['log_path'])
+            cli_args.append('--log_file_prefix=' + settings['log_path'] + 'port-' + str(settings['port']) + '.log')
+
+        if len(cli_args) > 1:
+            tornado.options.parse_command_line(cli_args)
+
         if isinstance(routes, ModuleType):
             routes = routes.routes
 
@@ -380,6 +398,11 @@ class RequestHandler(tornado.web.RequestHandler):
         self.set_header('Cache-Control', 'no-cache, no-store, must-revalidate')
         self.set_header('Pragma', 'no-cache')
         self.set_header('Expires', '0')
+
+    def render_json(self, data):
+        self.set_header('Content-Type', 'application/json')
+        self.write(to_json(data))
+        self.finish()
 
     def write_error(self, status_code, **kwargs):
         kwargs['code'] = status_code
