@@ -11,6 +11,7 @@ import tornado.options
 import tornado.escape
 import tornado.ioloop
 import tornado.web
+import tornado.websocket
 import http.client
 import traceback
 import importlib
@@ -56,7 +57,7 @@ class RouteProvider:
         if created_route.path not in self._routes:
             self._routes[created_route.path] = []
 
-        if created_route.handler_name in self._filters:
+        if hasattr(created_route, 'handler_name') and created_route.handler_name in self._filters:
             created_route.set_filters(self._filters[created_route.handler_name])
         elif '*' in self._filters:
             created_route.set_filters(self._filters['*'])
@@ -65,7 +66,7 @@ class RouteProvider:
         self._routes[created_route.path].append(created_route)
 
     def _save_subdomain_route(self, subdomain, created_route):
-        if created_route.handler_name in self._filters:
+        if hasattr(created_route, 'handler_name') and created_route.handler_name in self._filters:
             created_route.set_filters(self._filters[created_route.handler_name])
         elif '*' in self._filters:
             created_route.set_filters(self._filters['*'])
@@ -76,6 +77,13 @@ class RouteProvider:
         if created_route.path not in self._subdomain_routes:
             self._subdomain_routes[subdomain][created_route.path] = []
         self._subdomain_routes[subdomain][created_route.path].append(created_route)
+
+    def _attach_event_handlers(self, controller, receiver):
+        if hasattr(receiver, 'method'):
+            setattr(controller, receiver.method.lower(), receiver.handler)
+        else:
+            for attr in dir(receiver.handler):
+                setattr(controller, attr, getattr(receiver.handler, attr))
 
     def path(self, method, url, action, options=None):
         created_route = route.Route(method, url, action, options)
@@ -100,6 +108,12 @@ class RouteProvider:
         if not self._stop_saving:
             for resource in created_route:
                 self._save_route(resource)
+        return created_route
+
+    def websocket(self, url, action, options=None):
+        created_route = route.WebsocketRoute(url, action, options)
+        if not self._stop_saving:
+            self._save_route(created_route)
         return created_route
 
     def subdomain(self, subdomain, urls):
@@ -139,11 +153,13 @@ class RouteProvider:
             options = {}
             for receiver in saved_route[1]:
                 if saved_route[0] not in tmp_urls:
-                    route_controller = route.generate_controller(self._hooks)
-                    setattr(route_controller, receiver.method.lower(), receiver.handler)
-                    tmp_urls[saved_route[0]] = route_controller
+                    route_controller = route.generate_controller(self._hooks, receiver)
                 else:
-                    setattr(tmp_urls[saved_route[0]], receiver.method.lower(), receiver.handler)
+                    route_controller = tmp_urls[saved_route[0]]
+
+                self._attach_event_handlers(route_controller, receiver)
+                tmp_urls[saved_route[0]] = route_controller
+
                 if receiver.options:
                     options = options.update(receiver.options)
             tmp_urls[saved_route[0]] = (saved_route[0], tmp_urls[saved_route[0]], options)
@@ -157,11 +173,13 @@ class RouteProvider:
                 options = {}
                 for receiver in saved_route[1]:
                     if saved_route[0] not in tmp_urls:
-                        route_controller = route.generate_controller(self._hooks)
-                        setattr(route_controller, receiver.method.lower(), receiver.handler)
-                        tmp_urls[saved_route[0]] = route_controller
+                        route_controller = route.generate_controller(self._hooks, receiver)
                     else:
-                        setattr(tmp_urls[saved_route[0]], receiver.method.lower(), receiver.handler)
+                        route_controller = tmp_urls[saved_route[0]]
+
+                    self._attach_event_handlers(route_controller, receiver)
+                    tmp_urls[saved_route[0]] = route_controller
+
                     if receiver.options:
                         options = options.update(receiver.options)
                 tmp_urls[saved_route[0]] = (saved_route[0], tmp_urls[saved_route[0]], options)
@@ -377,7 +395,7 @@ class URI:
         return self.segments[index]
 
 class RequestHandler(tornado.web.RequestHandler):
-    
+
     def __init__(self, application, request, **kwargs):
         self._setup(application, request)
         super().__init__(application, request, **kwargs)
@@ -393,7 +411,7 @@ class RequestHandler(tornado.web.RequestHandler):
         self.application = application
         if not hasattr(self, 'uri'):
             self.uri = URI(self.request.path)
-        
+
     def disable_cache(self):
         self.set_header('Cache-Control', 'no-cache, no-store, must-revalidate')
         self.set_header('Pragma', 'no-cache')
@@ -487,13 +505,16 @@ class RequestHandler(tornado.web.RequestHandler):
     def is_finished(self):
         return self._finished
 
+class WebSocketHandler(tornado.websocket.WebSocketHandler):
+    pass
+
 class ErrorHandler(RequestHandler):
 
     def __init__(self, application, request, status_code):
         super().__init__(application, request)
         self.set_status(status_code)
-    
+
     def prepare(self):
         raise tornado.web.HTTPError(self._status_code)
- 
+
 tornado.web.ErrorHandler = ErrorHandler

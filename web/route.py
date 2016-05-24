@@ -4,21 +4,25 @@ import tornado.web
 import hurricane.web
 import hurricane.io
 
-def generate_controller(events):
-    class RouteHandler(hurricane.web.RequestHandler):
-        pass
+def generate_controller(events, receiver):
+    if hasattr(receiver, 'method'):
+        controller = type('RouteHandler', (hurricane.web.RequestHandler,), {})
+    else:
+        controller = type('RouteHandler', (hurricane.web.WebSocketHandler,), {})
 
     if hasattr(events, 'prepare'):
         if not callable(events.prepare):
             raise ActionNotCallableError('Event or Action is not callable')
-        setattr(RouteHandler, 'prepare', hurricane.io.make_coroutine(events.prepare))
+        setattr(controller, 'prepare', hurricane.io.make_coroutine(events.prepare))
 
     if hasattr(events, 'on_finish'):
         if not callable(events.on_finish):
             raise ActionNotCallableError('Event or Action is not callable')
-        setattr(RouteHandler, 'on_finish', events.on_finish)
-        
-    return RouteHandler
+        setattr(controller, 'on_finish', events.on_finish)
+
+    return controller
+
+
 
 class ActionNotCallableError(Exception):
 
@@ -33,7 +37,7 @@ class Route:
         self.action = 'index'
         if len(module) > 1:
             self.action = module[1]
-        
+
         self.method = method
         self.options = options
         self.path = '/' + path.lstrip('/')
@@ -92,7 +96,7 @@ class Route:
             def route_handler(self, **kwargs):
                 if not filters:
                     yield action(self, **kwargs)
-                    return 
+                    return
 
                 if (yield before_func(self)):
                     yield action(self, **kwargs)
@@ -103,6 +107,17 @@ class Route:
             def route_handler(self, **kwargs):
                 pass
             self.handler = route_handler
+
+class WebsocketRoute:
+
+    def __init__(self, path, action, options=None):
+        self.controller = action
+        self.options = options
+        self.path = '/' + path.lstrip('/')
+
+    def create_handler(self):
+        module = importlib.import_module('app.controllers.' + self.controller)
+        self.handler = module
 
 class RouteGroup:
 
