@@ -83,7 +83,16 @@ class RouteProvider:
             setattr(controller, receiver.method.lower(), receiver.handler)
         else:
             for attr in dir(receiver.handler):
-                setattr(controller, attr, getattr(receiver.handler, attr))
+                callback = getattr(receiver.handler, attr)
+
+                if attr == 'open':
+                    callback = websocket_open(callback)
+                elif attr == 'on_message':
+                    callback = websocket_on_message(callback)
+                elif attr == 'on_close':
+                    callback = websocket_on_close(callback)
+
+                setattr(controller, attr, callback)
 
     def path(self, method, url, action, options=None):
         created_route = route.Route(method, url, action, options)
@@ -506,7 +515,37 @@ class RequestHandler(tornado.web.RequestHandler):
         return self._finished
 
 class WebSocketHandler(tornado.websocket.WebSocketHandler):
-    pass
+
+    HEARTBEAT = '--heartbeat--'
+
+    def _send_heartbeat(self):
+        self.write_message(self.HEARTBEAT)
+
+    def render_json(self, data, binary=False):
+        self.write_message(to_json(data))
+
+def websocket_open(callback):
+    def open(self):
+        self.callback = tornado.ioloop.PeriodicCallback(self._send_heartbeat, 4000)
+        self.callback.start()
+
+        callback(self)
+    return open
+
+def websocket_on_message(callback):
+    def on_message(self, message):
+        if message == self.HEARTBEAT:
+            return
+
+        callback(self, message)
+    return on_message
+
+def websocket_on_close(callback):
+    def on_close(self):
+        self.callback.stop()
+
+        callback(self)
+    return on_close
 
 class ErrorHandler(RequestHandler):
 
