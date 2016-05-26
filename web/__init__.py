@@ -5,6 +5,8 @@ from hurricane.helpers import to_json
 from motorengine import Document
 from hurricane.db import Model
 from types import ModuleType
+from tornadoredis.client import Client
+from tornadoredis.pubsub import BaseSubscriber
 from . import route
 
 import tornado.options
@@ -19,6 +21,7 @@ import signal
 import sys
 import re
 import os
+import redis
 
 class RouteProvider:
 
@@ -234,7 +237,12 @@ class Config:
         'thread_max_workers',
         'database',
         'enable_logs',
-        'log_path'
+        'log_path',
+        'redis_host',
+        'redis_port',
+        'redis_db',
+        'redis_password',
+        'websocket_url'
     ]
 
     _default_values = {
@@ -246,7 +254,12 @@ class Config:
         'static_url_prefix': 'assets/',
         'global_xss_filter': False,
         'log_path': 'logs/',
-        'enable_logs': False
+        'enable_logs': False,
+        'redis_host': '127.0.0.1',
+        'redis_port': 6379,
+        'redis_db': 0,
+        'redis_password': None,
+        'websocket_url': '/ws'
     }
 
     @staticmethod
@@ -320,6 +333,8 @@ class Application(tornado.web.Application):
         self._hooks = events
         self._filters = {}
         self.subdomains = []
+        self.redis = redis.StrictRedis(host=settings['redis_host'], port=settings['redis_port'], db=settings['redis_db'], password=settings['redis_password'])
+        self.websocket_url = settings['websocket_url']
 
         for arg_value in sys.argv:
             if arg_value.find('--port=') == 0:
@@ -514,10 +529,43 @@ class RequestHandler(tornado.web.RequestHandler):
     def is_finished(self):
         return self._finished
 
+    def publish_message(self, message, **kwargs):
+        # TODO: implement users, groups, and session
+        channel = ''
+
+        if 'facility' in kwargs and kwargs['facility']:
+            channel = kwargs['facility']
+
+            if 'broadcast' in kwargs and kwargs['broadcast']:
+                channel = 'broadcast:{}'.format(channel)
+                self.application.redis.publish(channel, message)
+
+class WebsocketSubscriber(BaseSubscriber):
+
+    def on_message(self, message):
+        if not message:
+            return
+
+        if message.kind == 'message' and message.body:
+            subscribers = list(self.subscribers[message.channel].keys())
+
+            if subscribers:
+                for subscriber in subscribers:
+                    subscriber.write_message(message.body)
+
+        super().on_message(message)
+
+subscriber = WebsocketSubscriber(Client())
+
 def websocket_open(action):
     def open(self, *args, **kwargs):
         self.callback = tornado.ioloop.PeriodicCallback(self._send_heartbeat, 4000)
         self.callback.start()
+
+        if self.get_argument('subscribe-broadcast', None) is not None:
+            self.channels.append('broadcast:{}'.format(self.facility))
+
+        subscriber.subscribe(self.channels, self)
 
         action(self, *args, **kwargs)
 
@@ -533,10 +581,12 @@ def websocket_on_message(action):
 
     return on_message
 
-
 def websocket_on_close(action):
     def on_close(self):
         self.callback.stop()
+
+        for channel in self.channels:
+            subscriber.unsubscribe(channel, self)
 
         action(self)
 
@@ -546,11 +596,18 @@ class WebSocketHandler(tornado.websocket.WebSocketHandler):
 
     HEARTBEAT = '--heartbeat--'
 
+    def __init__(self, application, request, **kwargs):
+        self._setup(application, request)
+        super().__init__(application, request, **kwargs)
+
+    def _setup(self, application, request):
+        self.channels = []
+        self.request = request
+        self.application = application
+        self.facility = re.sub('(^/*|/*$)', '', request.path.replace(application.websocket_url, ''))
+
     def _send_heartbeat(self):
         self.write_message(self.HEARTBEAT)
-
-    def render_json(self, data, binary=False):
-        self.write_message(to_json(data), binary)
 
     def get_value(self, name, values, default=None, strip=True, xss_filter=None):
         value = default
@@ -562,6 +619,17 @@ class WebSocketHandler(tornado.websocket.WebSocketHandler):
             return tornado.escape.xhtml_escape(value)
 
         return value
+
+    def publish_message(self, message, **kwargs):
+        # TODO: implement users, groups, and session
+        channel = ''
+
+        if 'facility' in kwargs and kwargs['facility']:
+            channel = kwargs['facility']
+
+            if 'broadcast' in kwargs and kwargs['broadcast']:
+                channel = 'broadcast:{}'.format(channel)
+                self.application.redis.publish(channel, message)
 
     @websocket_open
     def open(self, *args, **kwargs):
