@@ -1,6 +1,6 @@
 from hurricane.template import Loader, append_template_suffix
 from motorengine.connection import connect
-from hurricane.io import AsyncTaskPool
+from hurricane.io import AsyncTaskPool, make_coroutine
 from hurricane.helpers import to_json
 from motorengine import Document
 from hurricane.db import Model
@@ -514,6 +514,34 @@ class RequestHandler(tornado.web.RequestHandler):
     def is_finished(self):
         return self._finished
 
+def websocket_open(action):
+    def open(self, *args, **kwargs):
+        self.callback = tornado.ioloop.PeriodicCallback(self._send_heartbeat, 4000)
+        self.callback.start()
+
+        action(self, *args, **kwargs)
+
+    return open
+
+def websocket_on_message(action):
+    def on_message(self, message):
+        if message == self.HEARTBEAT:
+            return
+
+        coroutine = make_coroutine(action)
+        coroutine(self, message)
+
+    return on_message
+
+
+def websocket_on_close(action):
+    def on_close(self):
+        self.callback.stop()
+
+        action(self)
+
+    return on_close
+
 class WebSocketHandler(tornado.websocket.WebSocketHandler):
 
     HEARTBEAT = '--heartbeat--'
@@ -522,30 +550,30 @@ class WebSocketHandler(tornado.websocket.WebSocketHandler):
         self.write_message(self.HEARTBEAT)
 
     def render_json(self, data, binary=False):
-        self.write_message(to_json(data))
+        self.write_message(to_json(data), binary)
 
-def websocket_open(callback):
-    def open(self):
-        self.callback = tornado.ioloop.PeriodicCallback(self._send_heartbeat, 4000)
-        self.callback.start()
+    def get_value(self, name, values, default=None, strip=True, xss_filter=None):
+        value = default
 
-        callback(self)
-    return open
+        if name in values:
+            value = values[name]
 
-def websocket_on_message(callback):
-    def on_message(self, message):
-        if message == self.HEARTBEAT:
-            return
+        if value and (xss_filter is True or (xss_filter is None and self.settings.get('global_xss_filter'))):
+            return tornado.escape.xhtml_escape(value)
 
-        callback(self, message)
-    return on_message
+        return value
 
-def websocket_on_close(callback):
+    @websocket_open
+    def open(self, *args, **kwargs):
+        pass
+
+    @websocket_on_message
+    def on_message(self):
+        pass
+
+    @websocket_on_close
     def on_close(self):
-        self.callback.stop()
-
-        callback(self)
-    return on_close
+        pass
 
 class ErrorHandler(RequestHandler):
 
