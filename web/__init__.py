@@ -123,7 +123,7 @@ class RouteProvider:
         return created_route
 
     def websocket(self, url, action, options=None):
-        created_route = route.WebsocketRoute(url, action, options)
+        created_route = route.WebSocketRoute(url, action, options)
         if not self._stop_saving:
             self._save_route(created_route)
         return created_route
@@ -540,7 +540,7 @@ class RequestHandler(tornado.web.RequestHandler):
                 channel = 'broadcast:{}'.format(channel)
                 self.application.redis.publish(channel, message)
 
-class WebsocketSubscriber(BaseSubscriber):
+class WebSocketSubscriber(BaseSubscriber):
 
     def on_message(self, message):
         if not message:
@@ -555,7 +555,7 @@ class WebsocketSubscriber(BaseSubscriber):
 
         super().on_message(message)
 
-subscriber = WebsocketSubscriber(Client())
+subscriber = WebSocketSubscriber(Client())
 
 def websocket_open(action):
     def open(self, *args, **kwargs):

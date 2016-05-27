@@ -108,7 +108,7 @@ class Route:
                 pass
             self.handler = route_handler
 
-class WebsocketRoute:
+class WebSocketRoute:
 
     def __init__(self, path, action, options=None):
         self.controller = action
