@@ -1,4 +1,4 @@
-from tornado.escape import json_encode
+from bson.json_util import dumps
 from hurricane.db import Model
 
 def to_json_serializable(data):
@@ -15,4 +15,4 @@ def to_json_serializable(data):
     return data
 
 def to_json(data):
-    return json_encode(to_json_serializable(data))
+    return dumps(to_json_serializable(data)).replace("</", "<\\/")
